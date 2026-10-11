@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e1a75f85d289e1f43939c6c6084c15a1, type: 3}
+  m_Name: PuzzleDatabase
+  m_EditorClassIdentifier: Assembly-CSharp::TrickyPictures.PuzzleDatabase
+  Puzzles:
+  - {fileID: 11400000, guid: a6530faf8de70bf4fa9696e5b80ee5c6, type: 2}
+  - {fileID: 11400000, guid: 69404b08687469c418c1dabe0b45ae9c, type: 2}
+  - {fileID: 11400000, guid: 4485eee221fcc2e48ad71d0b7f1f3c0e, type: 2}
+  - {fileID: 11400000, guid: 6247e2ad138f27d49a6f5127da7dd1bd, type: 2}
+  - {fileID: 11400000, guid: bf9caacb63bf0ed4aad24669bc5dbed9, type: 2}
+  - {fileID: 11400000, guid: b590ed5906c3f1441993e309e2538421, type: 2}
+  - {fileID: 11400000, guid: 8db52c3bfbb0f4f45b73e2d24c66a71a, type: 2}
+  - {fileID: 11400000, guid: 25821fff651030c4595f16369ada2de1, type: 2}
+  - {fileID: 11400000, guid: 1dc2c860b2e513d4fb6948a4c17f359b, type: 2}
+  - {fileID: 11400000, guid: 24a6c6d58e2f10649b27970a199dc725, type: 2}
+  - {fileID: 11400000, guid: f81c24306d4bad14ba0837cf0becb7db, type: 2}
+  - {fileID: 11400000, guid: e89e362e238bae846878313f749e0f2f, type: 2}
+  - {fileID: 11400000, guid: 856be2dbf855ee049bfb3e2da188723d, type: 2}
+  - {fileID: 11400000, guid: 22ebfd8e3d3e94e4884d6cc867e7d3bb, type: 2}
