@@ -305,6 +305,22 @@ namespace TrickyPictures.EditorTools
             new PuzzleSeed("backwards", "Backwards", PuzzleDifficulty.Easy, "SDRAWKCAB", "backward"),
             new PuzzleSeed("split-second", "Split second", PuzzleDifficulty.Easy, "SEC          OND", "a split second"),
             new PuzzleSeed("upside-down", "Upside down", PuzzleDifficulty.Medium, "<rotate=180>NWOD</rotate>", "upsidedown"),
+            new PuzzleSeed("three-degrees-below-zero", "Three degrees below zero", PuzzleDifficulty.Hard, "<size=160%>0</size>\n<size=70%>\u00B0      \u00B0      \u00B0</size>", "3 degrees below zero", "three degrees below 0"),
+            new PuzzleSeed("just-between-you-and-me", "Just between you and me", PuzzleDifficulty.Hard, "YOU          JUST          ME", "just between us"),
+            new PuzzleSeed("somewhere-over-the-rainbow", "Somewhere over the rainbow", PuzzleDifficulty.Medium, "<u>SOMEWHERE</u>\nRAINBOW", "somewhere over rainbow"),
+            new PuzzleSeed("jack-in-the-box", "Jack in the box", PuzzleDifficulty.Medium, "<size=80%>\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502   JACK   \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518</size>", "jack-in-the-box"),
+            new PuzzleSeed("one-in-a-million", "One in a million", PuzzleDifficulty.Hard, "<size=80%>\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502  1000000  \u2502\n\u2502    ONE    \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518</size>", "1 in a million", "one in 1000000"),
+            new PuzzleSeed("broken-heart", "Broken heart", PuzzleDifficulty.Easy, "HE          ART", "a broken heart"),
+            new PuzzleSeed("small-talk", "Small talk", PuzzleDifficulty.Easy, "<size=40%>talk</size>", "smalltalk"),
+            new PuzzleSeed("top-secret", "Top secret", PuzzleDifficulty.Easy, "<voffset=1em>SECRET</voffset>", "topsecret"),
+            new PuzzleSeed("too-funny-for-words", "Too funny for words", PuzzleDifficulty.Hard, "2 FUNNY 4 WORDS", "too funny 4 words", "2 funny for words"),
+            new PuzzleSeed("long-underwear", "Long underwear", PuzzleDifficulty.Medium, "U\nN\nD\nE\nR\nWEAR", "long under wear"),
+            new PuzzleSeed("forgive-and-forget", "Forgive and forget", PuzzleDifficulty.Hard, "4GIVE  &  4GET", "4 give and 4 get", "forgive & forget"),
+            new PuzzleSeed("feeling-under-the-weather", "Feeling under the weather", PuzzleDifficulty.Medium, "<u>WEATHER</u>\nFEELING", "feeling under weather"),
+            new PuzzleSeed("quit-following-me", "Quit following me", PuzzleDifficulty.Medium, "ME\nQUIT"),
+            new PuzzleSeed("double-cross", "Double cross", PuzzleDifficulty.Easy, "CROSS\nCROSS", "a double cross"),
+            new PuzzleSeed("square-meal", "Square meal", PuzzleDifficulty.Medium, "<size=80%>\u250C\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n\u2502  MEAL  \u2502\n\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518</size>", "a square meal"),
+            new PuzzleSeed("rising-cost", "Rising cost", PuzzleDifficulty.Medium, "<size=50%>C</size><size=75%>O</size><size=110%>S</size><size=150%>T</size>", "rising costs"),
         };
 
         // Pads to equal width with non-breaking spaces so centred monospace lines stay aligned.
@@ -326,16 +342,17 @@ namespace TrickyPictures.EditorTools
                 var seed = Seeds[i];
                 var path = $"{PuzzleFolder}/Puzzle_{i + 1:00}_{seed.Answer.Replace(" ", "")}.asset";
                 var puzzle = AssetDatabase.LoadAssetAtPath<PuzzleDefinition>(path);
-                if (puzzle) continue; // never overwrite edited puzzles
-
-                puzzle = ScriptableObject.CreateInstance<PuzzleDefinition>();
-                puzzle.PuzzleId = seed.Id;
-                puzzle.CanonicalAnswer = seed.Answer;
-                puzzle.AcceptedAnswers = seed.Alternatives;
-                puzzle.RebusText = seed.Rebus;
-                puzzle.Difficulty = seed.Difficulty;
-                AssetDatabase.CreateAsset(puzzle, path);
-                if (!database.Puzzles.Contains(puzzle)) database.Puzzles.Add(puzzle);
+                if (!puzzle)
+                {
+                    puzzle = ScriptableObject.CreateInstance<PuzzleDefinition>();
+                    puzzle.PuzzleId = seed.Id;
+                    puzzle.CanonicalAnswer = seed.Answer;
+                    puzzle.AcceptedAnswers = seed.Alternatives;
+                    puzzle.RebusText = seed.Rebus;
+                    puzzle.Difficulty = seed.Difficulty;
+                    AssetDatabase.CreateAsset(puzzle, path);
+                }
+                if (puzzle && !database.Puzzles.Contains(puzzle)) database.Puzzles.Add(puzzle);
             }
 
             EditorUtility.SetDirty(database);

@@ -13,7 +13,7 @@ namespace TrickyPictures
         public void Set(string sender, string avatarId, string message)
         {
             if (senderName) senderName.text = sender;
-            if (avatar) avatar.color = AvatarPalette.Get(avatarId);
+            if (avatar) AvatarPortrait.Paint(avatar, avatarId);
             if (messageText)
             {
                 messageText.text = message;

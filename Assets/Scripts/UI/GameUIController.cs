@@ -83,6 +83,7 @@ namespace TrickyPictures
 
         const int MaxChatMessages = 100;
         static readonly Color OfflineColor = new Color32(230, 126, 34, 255);
+        static readonly Color OnlineColor = new Color32(46, 204, 113, 255);
         static readonly Color TimerColor = new Color32(255, 201, 60, 255);
         static readonly Color TimerWarningColor = new Color32(231, 76, 60, 255);
         const float TimerWarningSeconds = 5f;
@@ -94,11 +95,15 @@ namespace TrickyPictures
         readonly Queue<GameObject> chatMessages = new Queue<GameObject>();
         readonly RateLimiter chatLimiter = new RateLimiter(AppConfig.ChatRateLimitCount, AppConfig.ChatRateLimitWindow);
 
+        readonly RateLimiter guessLimiter = new RateLimiter(AppConfig.GuessRateLimitCount, AppConfig.GuessRateLimitWindow);
+
         MatchPlayer localPlayer;
+        OnlineMatch online;
         bool guessMode;
+        bool showingLobby;
         Coroutine toastRoutine;
 
-        bool IsRoomMode => MatchLaunchSettings.Mode == MatchMode.PrivateRoom;
+        bool IsOnline => MatchLaunchSettings.IsOnline;
 
         void Awake()
         {
@@ -144,38 +149,49 @@ namespace TrickyPictures
                 return;
             }
 
-            var profile = ProfileService.Current;
-            localPlayer = new MatchPlayer(profile.PlayerId, profile.DisplayName, profile.AvatarId, isHost: true);
             roundManager.Configure(MatchLaunchSettings.Rounds, MatchLaunchSettings.RoundDuration);
-            roundManager.AddPlayer(localPlayer);
-
             roundManager.RoundStarted += OnRoundStarted;
             roundManager.CorrectGuess += OnCorrectGuess;
             roundManager.IncorrectGuess += OnIncorrectGuess;
             roundManager.RoundEnded += OnRoundEnded;
             roundManager.MatchEnded += OnMatchEnded;
             roundManager.ScoresChanged += RefreshPlayerList;
+            roundManager.RosterChanged += RefreshLobby;
+
+            var session = FusionSession.Instance;
+            bool connected = IsOnline && session && session.IsOnline;
+            if (IsOnline && !connected)
+            {
+                AddSystemMessage("The online session dropped. Returning to the menu.");
+                LeaveToMenu();
+                return;
+            }
 
             if (connectionStatusText)
             {
-                connectionStatusText.text = "Offline";
-                connectionStatusText.color = OfflineColor;
+                connectionStatusText.text = connected ? (session.IsHost ? "Host" : "Online") : "Offline";
+                connectionStatusText.color = connected ? OnlineColor : OfflineColor;
             }
-            if (connectionStatusDot) connectionStatusDot.color = OfflineColor;
-            if (roomCodeLabel) roomCodeLabel.text = IsRoomMode ? "Room: " + MatchLaunchSettings.RoomCode : "Solo Practice";
+            if (connectionStatusDot) connectionStatusDot.color = connected ? OnlineColor : OfflineColor;
+            if (roomCodeLabel) roomCodeLabel.text = RoomLabel();
 
             if (chatModeToggle) chatModeToggle.isOn = true;
             SetGuessMode(false);
             HideOverlays();
-            RefreshPlayerList();
 
-            if (IsRoomMode)
+            if (connected)
             {
+                online = gameObject.AddComponent<OnlineMatch>();
+                online.Initialize(roundManager, this);
                 ShowLobby();
             }
             else
             {
-                AddSystemMessage("Solo practice. Online multiplayer isn't connected yet.");
+                var profile = ProfileService.Current;
+                localPlayer = new MatchPlayer(profile.PlayerId, profile.DisplayName, profile.AvatarId, isHost: true);
+                roundManager.AddPlayer(localPlayer);
+                RefreshPlayerList();
+                AddSystemMessage("Solo practice. Use Play Globally or a room code for online matches.");
                 BeginMatch();
             }
         }
@@ -189,6 +205,7 @@ namespace TrickyPictures
             roundManager.RoundEnded -= OnRoundEnded;
             roundManager.MatchEnded -= OnMatchEnded;
             roundManager.ScoresChanged -= RefreshPlayerList;
+            roundManager.RosterChanged -= RefreshLobby;
         }
 
         void Update()
@@ -212,6 +229,16 @@ namespace TrickyPictures
                 int seconds = Mathf.Max(1, Mathf.CeilToInt(roundManager.ResultTimeRemaining));
                 nextRoundText.text = (roundManager.IsLastRound ? "Final results in " : "Next round in ") + seconds + "...";
             }
+
+            if (online && lobbyPanel && lobbyPanel.activeSelf && lobbyPlayerCountText)
+                lobbyPlayerCountText.text = online.LobbyStatus(roundManager.Players.Count);
+        }
+
+        string RoomLabel()
+        {
+            if (MatchLaunchSettings.Mode == MatchMode.Global) return "Global Match";
+            if (MatchLaunchSettings.Mode == MatchMode.PrivateRoom) return "Room: " + MatchLaunchSettings.RoomCode;
+            return "Solo Practice";
         }
 
         static void Bind(Button button, UnityEngine.Events.UnityAction action)
@@ -257,7 +284,9 @@ namespace TrickyPictures
 
         void OnRoundStarted()
         {
+            if (lobbyPanel) lobbyPanel.SetActive(false);
             if (roundResultPanel) roundResultPanel.SetActive(false);
+            if (finalLeaderboardPanel) finalLeaderboardPanel.SetActive(false);
             var puzzle = roundManager.CurrentPuzzle;
 
             if (puzzleImage)
@@ -279,7 +308,7 @@ namespace TrickyPictures
 
         void OnCorrectGuess(MatchPlayer player, int position, int points)
         {
-            bool isLocal = player == localPlayer;
+            bool isLocal = player.PlayerId == ProfileService.Current.PlayerId;
             AddCorrectGuessMessage($"{(isLocal ? "You" : player.DisplayName)} guessed the answer!  +{points}");
             if (isLocal && roundStatusText) roundStatusText.text = $"Correct! +{points} points";
         }
@@ -291,6 +320,7 @@ namespace TrickyPictures
 
         void OnRoundEnded(PuzzleDefinition puzzle)
         {
+            if (puzzle == null) return;
             AddSystemMessage("The answer was: " + puzzle.CanonicalAnswer);
             if (roundStatusText) roundStatusText.text = "Round over!";
             if (timeProgressFill) timeProgressFill.fillAmount = roundManager.RemainingTime / roundManager.RoundDuration;
@@ -358,7 +388,8 @@ namespace TrickyPictures
 
         string Points(MatchPlayer p) => roundManager.Scores.GetTotal(p.PlayerId) + " pts";
 
-        string DisplayNameOf(MatchPlayer p) => p == localPlayer ? p.DisplayName + " (You)" : p.DisplayName;
+        string DisplayNameOf(MatchPlayer p) =>
+            p.PlayerId == ProfileService.Current.PlayerId ? p.DisplayName + " (You)" : p.DisplayName;
 
         void RefreshPlayerList()
         {
@@ -413,7 +444,19 @@ namespace TrickyPictures
                     AddSystemMessage("You're sending messages too fast.");
                     return;
                 }
-                AddChatMessage(localPlayer, Escape(text));
+                if (online != null) online.SendChat(text);
+                else AddChatMessage(localPlayer, Escape(text));
+                return;
+            }
+
+            if (online != null && !online.IsHost)
+            {
+                if (!guessLimiter.TryConsume())
+                {
+                    AddSystemMessage("Slow down a little!");
+                    return;
+                }
+                online.SendGuess(text);
                 return;
             }
 
@@ -463,8 +506,10 @@ namespace TrickyPictures
 
         // ---------------- Lobby ----------------
 
-        void ShowLobby()
+        public void ShowLobby()
         {
+            if (showingLobby) return;
+            showingLobby = true;
             roundManager.ReturnToLobby();
             HideOverlays();
             if (roundCounter) roundCounter.text = "Lobby";
@@ -482,20 +527,24 @@ namespace TrickyPictures
             }
             if (puzzleImage) puzzleImage.sprite = null;
 
-            bool hasCode = IsRoomMode && !string.IsNullOrEmpty(MatchLaunchSettings.RoomCode);
-            if (lobbyRoomCodeText) lobbyRoomCodeText.text = hasCode ? MatchLaunchSettings.RoomCode : "SOLO";
+            RefreshLobby();
+            RefreshPlayerList();
+
+            bool hasCode = MatchLaunchSettings.Mode == MatchMode.PrivateRoom && !string.IsNullOrEmpty(MatchLaunchSettings.RoomCode);
+            if (lobbyRoomCodeText)
+                lobbyRoomCodeText.text = MatchLaunchSettings.Mode == MatchMode.Global ? "GLOBAL" : (hasCode ? MatchLaunchSettings.RoomCode : "SOLO");
             if (copyCodeButton) copyCodeButton.interactable = hasCode;
             if (shareButton) shareButton.interactable = hasCode;
 
-            bool isHost = localPlayer.IsHost;
+            bool isHost = localPlayer != null && localPlayer.IsHost;
             if (matchSettingsRoot) matchSettingsRoot.SetActive(isHost);
             if (startMatchButton) startMatchButton.gameObject.SetActive(isHost);
             if (roundsDropdown) roundsDropdown.SetValueWithoutNotify(IndexOf(AppConfig.RoundOptions, roundManager.TotalRounds));
             if (durationDropdown) durationDropdown.SetValueWithoutNotify(IndexOf(AppConfig.DurationOptions, (int)roundManager.RoundDuration));
 
-            RefreshLobby();
-            RefreshPlayerList();
             if (lobbyPanel) lobbyPanel.SetActive(true);
+            if (online && online.ShouldAnnounceLobby) online.AnnounceLobby();
+            showingLobby = false;
         }
 
         static int IndexOf(int[] options, int value)
@@ -506,9 +555,13 @@ namespace TrickyPictures
 
         void RefreshLobby()
         {
+            var me = roundManager.GetPlayer(ProfileService.Current.PlayerId);
+            if (me != null) localPlayer = me;
             int count = roundManager.Players.Count;
             if (lobbyPlayerCountText)
-                lobbyPlayerCountText.text = $"Players {count} / {AppConfig.MaxPlayers}  -  Offline: online players can't join yet";
+                lobbyPlayerCountText.text = online != null
+                    ? online.LobbyStatus(count)
+                    : $"Players {count} / {AppConfig.MaxPlayers}";
 
             Clear(lobbySlots);
             if (lobbySlotTemplate)
@@ -524,23 +577,33 @@ namespace TrickyPictures
             if (readyButton)
             {
                 var label = readyButton.GetComponentInChildren<TMP_Text>();
-                if (label) label.text = localPlayer.IsReady ? "Not Ready" : "Ready";
+                if (label) label.text = localPlayer != null && localPlayer.IsReady ? "Not Ready" : "Ready";
             }
         }
 
         void ToggleReady()
         {
             if (localPlayer == null) return;
+            if (online != null)
+            {
+                online.SendReady(!localPlayer.IsReady);
+                return;
+            }
             localPlayer.IsReady = !localPlayer.IsReady;
             RefreshLobby();
         }
 
-        void StartMatchFromLobby()
+        public void StartMatchFromLobby()
         {
             if (localPlayer == null || !localPlayer.IsHost) return;
             int rounds = roundsDropdown ? AppConfig.RoundOptions[Mathf.Clamp(roundsDropdown.value, 0, AppConfig.RoundOptions.Length - 1)] : roundManager.TotalRounds;
             int duration = durationDropdown ? AppConfig.DurationOptions[Mathf.Clamp(durationDropdown.value, 0, AppConfig.DurationOptions.Length - 1)] : (int)roundManager.RoundDuration;
             MatchLaunchSettings.SetMatchRules(rounds, duration);
+            if (online != null)
+            {
+                online.HostStart(rounds, duration);
+                return;
+            }
             roundManager.Configure(rounds, duration);
             AddSystemMessage($"Match started: {rounds} rounds, {duration} seconds each.");
             BeginMatch();
@@ -557,6 +620,17 @@ namespace TrickyPictures
 
         void PlayAgain()
         {
+            if (online != null)
+            {
+                if (!online.IsHost)
+                {
+                    online.RequestPlayAgain();
+                    AddSystemMessage("Asking the host to play again...");
+                    return;
+                }
+                online.HostStart(roundManager.TotalRounds, roundManager.RoundDuration);
+                return;
+            }
             AddSystemMessage("New match started!");
             BeginMatch();
         }
@@ -566,10 +640,29 @@ namespace TrickyPictures
             if (!pausePanel || !roundManager.IsMatchRunning) return;
             bool paused = !pausePanel.activeSelf;
             pausePanel.SetActive(paused);
-            roundManager.Paused = paused;
+            if (online == null || online.IsHost) roundManager.Paused = paused;
         }
 
-        void LeaveToMenu() => SceneTransitionService.Load(AppConfig.MainMenuScene);
+        public void LeaveToMenu()
+        {
+            FusionSession.Instance?.BeginShutdown();
+            SceneTransitionService.Load(AppConfig.MainMenuScene);
+        }
+
+        public void ApplyNetworkRoster(List<MatchPlayer> roster)
+        {
+            roundManager.ApplyRoster(roster);
+            localPlayer = roundManager.GetPlayer(ProfileService.Current.PlayerId);
+        }
+
+        public void PresentChat(string playerId, string text)
+        {
+            var player = roundManager.GetPlayer(playerId);
+            if (player == null) return;
+            AddChatMessage(player, Escape(text));
+        }
+
+        public void PresentSystem(string text) => AddSystemMessage(text);
 
         void ShowToast(string message)
         {

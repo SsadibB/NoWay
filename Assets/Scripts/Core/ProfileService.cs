@@ -29,15 +29,15 @@ namespace TrickyPictures
             {
                 PlayerId = id,
                 DisplayName = error == null ? name : AppConfig.DefaultDisplayName,
-                AvatarId = AvatarIdFromIndex(AvatarIndex(PlayerPrefs.GetString(AvatarIdKey, AvatarIdFromIndex(0)))),
+                AvatarId = AvatarLook.Parse(PlayerPrefs.GetString(AvatarIdKey, "")).ToId(),
             };
         }
 
-        public static void Save(string displayName, int avatarIndex)
+        public static void Save(string displayName, AvatarLook look)
         {
             var profile = Current;
             profile.DisplayName = displayName;
-            profile.AvatarId = AvatarIdFromIndex(avatarIndex);
+            profile.AvatarId = look.ToId();
             PlayerPrefs.SetString(DisplayNameKey, profile.DisplayName);
             PlayerPrefs.SetString(AvatarIdKey, profile.AvatarId);
             PlayerPrefs.Save();

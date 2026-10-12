@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Threading;
 using TMPro;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -66,10 +67,13 @@ namespace TrickyPictures
 
         static readonly Color ErrorColor = new Color32(231, 76, 60, 255);
 
-        int selectedAvatar;
+        AvatarLook selectedLook;
+        AvatarPartPicker partPicker;
         string defaultNameLabel;
         Color defaultNameLabelColor;
         Coroutine matchmakingRoutine;
+        CancellationTokenSource connectCts;
+        bool searchCancelled;
 
         GameObject[] Panels => new[] { profilePanel, createRoomPanel, joinRoomPanel, matchmakingPanel, settingsPanel, howToPlayPanel };
 
@@ -129,6 +133,7 @@ namespace TrickyPictures
         {
             AudioService.ApplySavedSettings();
             CloseAllPanels();
+            EnsurePartPicker();
             RefreshHeader();
         }
 
@@ -163,7 +168,7 @@ namespace TrickyPictures
         {
             var profile = ProfileService.Current;
             if (profileButtonName) profileButtonName.text = profile.DisplayName;
-            if (profileButtonAvatar) profileButtonAvatar.color = AvatarPalette.Get(profile.AvatarId);
+            if (profileButtonAvatar) AvatarPortrait.Paint(profileButtonAvatar, profile.AvatarId);
         }
 
         // ---------------- Profile ----------------
@@ -171,18 +176,37 @@ namespace TrickyPictures
         void OpenProfile()
         {
             Open(profilePanel);
+            EnsurePartPicker();
             var profile = ProfileService.Current;
             if (displayNameInput) displayNameInput.text = profile.DisplayName;
             ShowNameError(null);
-            SelectAvatar(ProfileService.AvatarIndex(profile.AvatarId));
+            selectedLook = AvatarLook.Parse(profile.AvatarId);
+            if (partPicker) partPicker.SetLook(selectedLook);
+            if (avatarPreview) AvatarPortrait.Paint(avatarPreview, selectedLook.ToId());
+        }
+
+        void EnsurePartPicker()
+        {
+            if (partPicker || !avatarPreview) return;
+            if (avatarButtons != null && avatarButtons.Length > 0 && avatarButtons[0])
+                avatarButtons[0].transform.parent.gameObject.SetActive(false);
+            var pickerObject = new GameObject("AvatarPartPicker");
+            pickerObject.transform.SetParent(avatarPreview.transform.parent, false);
+            partPicker = pickerObject.AddComponent<AvatarPartPicker>();
+            var font = displayNameLabel ? displayNameLabel.font : TMP_Settings.defaultFontAsset;
+            partPicker.Build(avatarPreview.transform.parent, font);
+            partPicker.Changed += look =>
+            {
+                selectedLook = look;
+                if (avatarPreview) AvatarPortrait.Paint(avatarPreview, look.ToId());
+            };
         }
 
         void SelectAvatar(int index)
         {
-            selectedAvatar = index;
-            if (avatarPreview) avatarPreview.color = AvatarPalette.Get(index);
-            for (int i = 0; i < avatarSelectedMarks.Length; i++)
-                if (avatarSelectedMarks[i]) avatarSelectedMarks[i].SetActive(i == index);
+            selectedLook = AvatarLook.Presets[Mathf.Clamp(index, 0, AvatarLook.Presets.Length - 1)];
+            if (partPicker) partPicker.SetLook(selectedLook);
+            if (avatarPreview) AvatarPortrait.Paint(avatarPreview, selectedLook.ToId());
         }
 
         void SaveProfile()
@@ -193,7 +217,7 @@ namespace TrickyPictures
                 ShowNameError(error);
                 return;
             }
-            ProfileService.Save(name, selectedAvatar);
+            ProfileService.Save(name, selectedLook);
             RefreshHeader();
             CloseAllPanels();
         }
@@ -212,8 +236,15 @@ namespace TrickyPictures
             int rounds = Pick(AppConfig.RoundOptions, roundCountDropdown, AppConfig.DefaultRounds);
             int duration = Pick(AppConfig.DurationOptions, roundDurationDropdown, (int)AppConfig.DefaultRoundDuration);
             bool isPrivate = !roomVisibilityToggle || roomVisibilityToggle.isOn;
-            MatchLaunchSettings.SetPrivateRoom(rounds, duration, RoomCodeService.Generate(), isPrivate);
-            SceneTransitionService.Load(AppConfig.GameScene);
+            var code = RoomCodeService.Generate();
+            MatchLaunchSettings.SetPrivateRoom(rounds, duration, code, isPrivate);
+            BeginConnect("Creating room " + code + "...", "Opening a Photon Fusion room",
+                token => FusionSession.Ensure().CreateRoom(code, isPrivate, token),
+                result =>
+                {
+                    MatchLaunchSettings.SetPrivateRoom(rounds, duration, string.IsNullOrEmpty(result.RoomName) ? code : result.RoomName, isPrivate);
+                    SceneTransitionService.Load(AppConfig.GameScene);
+                });
         }
 
         static int Pick(int[] options, TMP_Dropdown dropdown, int fallback)
@@ -236,40 +267,87 @@ namespace TrickyPictures
         void JoinRoom()
         {
             var code = RoomCodeService.Normalize(roomCodeInput ? roomCodeInput.text : "");
-            string message = RoomCodeService.IsValidFormat(code)
-                ? "Room not found. Joining a friend's room needs online multiplayer (Photon Fusion), which isn't set up yet."
-                : "Enter a valid six-character code";
-            if (joinErrorText) joinErrorText.text = message;
+            if (!RoomCodeService.IsValidFormat(code))
+            {
+                if (joinErrorText) joinErrorText.text = "Enter a valid six-character code";
+                return;
+            }
+            if (joinErrorText) joinErrorText.text = "";
+            BeginConnect("Joining " + code + "...", "Looking up that room on Photon Fusion",
+                token => FusionSession.Ensure().JoinRoom(code, token),
+                result =>
+                {
+                    MatchLaunchSettings.SetPrivateRoom(AppConfig.DefaultRounds, AppConfig.DefaultRoundDuration, code, true);
+                    SceneTransitionService.Load(AppConfig.GameScene);
+                },
+                error =>
+                {
+                    Open(joinRoomPanel);
+                    if (joinErrorText) joinErrorText.text = error;
+                });
         }
 
         // ---------------- Matchmaking ----------------
 
         void StartMatchmaking()
         {
+            BeginConnect("Searching for players...", "Finding an open global room",
+                token => FusionSession.Ensure().ConnectGlobal(token),
+                result =>
+                {
+                    MatchLaunchSettings.SetGlobal(result.RoomName);
+                    SceneTransitionService.Load(AppConfig.GameScene);
+                });
+        }
+
+        void BeginConnect(string title, string hint, System.Func<CancellationToken, System.Threading.Tasks.Task<FusionSession.ConnectResult>> connect, System.Action<FusionSession.ConnectResult> onSuccess, System.Action<string> onError = null)
+        {
+            searchCancelled = false;
+            connectCts?.Cancel();
+            connectCts?.Dispose();
+            connectCts = new CancellationTokenSource();
             Open(matchmakingPanel);
             if (matchmakingRoutine != null) StopCoroutine(matchmakingRoutine);
-            matchmakingRoutine = StartCoroutine(MatchmakingRoutine());
+            matchmakingRoutine = StartCoroutine(ConnectRoutine(title, hint, connect, onSuccess, onError));
         }
 
         void CancelMatchmaking()
         {
+            searchCancelled = true;
+            connectCts?.Cancel();
             if (matchmakingRoutine != null) StopCoroutine(matchmakingRoutine);
             matchmakingRoutine = null;
+            FusionSession.Instance?.BeginShutdown();
             CloseAllPanels();
         }
 
-        IEnumerator MatchmakingRoutine()
+        IEnumerator ConnectRoutine(string title, string hint, System.Func<CancellationToken, System.Threading.Tasks.Task<FusionSession.ConnectResult>> connect, System.Action<FusionSession.ConnectResult> onSuccess, System.Action<string> onError)
         {
-            SetSearchText("Searching for players...", "Looking for a public room with free space");
-            yield return AnimateDots(2.5f);
-
-            SetSearchText("Online matchmaking isn't available yet",
-                "Photon Fusion isn't installed, so a solo practice match will start instead.");
-            yield return AnimateDots(3f);
-
+            SetSearchText(title, hint);
+            var task = connect(connectCts.Token);
+            while (!task.IsCompleted)
+            {
+                if (searchCancelled) yield break;
+                TickDots();
+                yield return null;
+            }
             matchmakingRoutine = null;
-            MatchLaunchSettings.SetPractice();
-            SceneTransitionService.Load(AppConfig.GameScene);
+            if (searchCancelled) yield break;
+            if (task.IsFaulted)
+            {
+                var message = task.Exception.GetBaseException().Message;
+                if (onError != null) onError(message);
+                else SetSearchText("Couldn't connect", message);
+                yield break;
+            }
+            var result = task.Result;
+            if (!result.Ok)
+            {
+                if (onError != null) onError(result.Error);
+                else SetSearchText("Couldn't connect", result.Error);
+                yield break;
+            }
+            onSuccess(result);
         }
 
         void SetSearchText(string title, string hint)
@@ -278,18 +356,16 @@ namespace TrickyPictures
             if (searchHintText) searchHintText.text = hint;
         }
 
-        IEnumerator AnimateDots(float duration)
+        void TickDots()
         {
-            for (float t = 0f; t < duration; t += Time.unscaledDeltaTime)
+            if (searchingDots == null) return;
+            float t = Time.unscaledTime;
+            for (int i = 0; i < searchingDots.Length; i++)
             {
-                for (int i = 0; i < searchingDots.Length; i++)
-                {
-                    if (!searchingDots[i]) continue;
-                    var c = searchingDots[i].color;
-                    c.a = 0.25f + 0.75f * Mathf.Abs(Mathf.Sin(t * 3f - i * 0.6f));
-                    searchingDots[i].color = c;
-                }
-                yield return null;
+                if (!searchingDots[i]) continue;
+                var c = searchingDots[i].color;
+                c.a = 0.25f + 0.75f * Mathf.Abs(Mathf.Sin(t * 3f - i * 0.6f));
+                searchingDots[i].color = c;
             }
         }
 

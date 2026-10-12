@@ -4,6 +4,7 @@ namespace TrickyPictures
     {
         Practice,
         PrivateRoom,
+        Global,
     }
 
     /// <summary>Settings chosen in the main menu and read by the Game scene.</summary>
@@ -15,12 +16,23 @@ namespace TrickyPictures
         public static string RoomCode { get; private set; } = "";
         public static bool IsPrivate { get; private set; }
 
+        public static bool IsOnline => Mode == MatchMode.PrivateRoom || Mode == MatchMode.Global;
+
         public static void SetPractice()
         {
             Mode = MatchMode.Practice;
             Rounds = AppConfig.DefaultRounds;
             RoundDuration = AppConfig.DefaultRoundDuration;
             RoomCode = "";
+            IsPrivate = false;
+        }
+
+        public static void SetGlobal(string sessionName)
+        {
+            Mode = MatchMode.Global;
+            Rounds = AppConfig.DefaultRounds;
+            RoundDuration = AppConfig.DefaultRoundDuration;
+            RoomCode = sessionName ?? "";
             IsPrivate = false;
         }
 

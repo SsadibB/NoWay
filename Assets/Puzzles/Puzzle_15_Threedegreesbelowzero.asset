@@ -1,0 +1,25 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: fe3098161be244c4bb4bc4c2875a3918, type: 3}
+  m_Name: Puzzle_15_Threedegreesbelowzero
+  m_EditorClassIdentifier: Assembly-CSharp::TrickyPictures.PuzzleDefinition
+  PuzzleId: three-degrees-below-zero
+  Image: {fileID: 0}
+  RebusText: "<size=160%>0</size>\n<size=70%>\u00B0      \u00B0      \u00B0</size>"
+  CanonicalAnswer: Three degrees below zero
+  AcceptedAnswers:
+  - 3 degrees below zero
+  - three degrees below 0
+  Difficulty: 2
+  Category: General
+  Language: en
+  IsActive: 1
