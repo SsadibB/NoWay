@@ -95,11 +95,8 @@ namespace TrickyPictures
         readonly Queue<GameObject> chatMessages = new Queue<GameObject>();
         readonly RateLimiter chatLimiter = new RateLimiter(AppConfig.ChatRateLimitCount, AppConfig.ChatRateLimitWindow);
 
-        readonly RateLimiter guessLimiter = new RateLimiter(AppConfig.GuessRateLimitCount, AppConfig.GuessRateLimitWindow);
-
         MatchPlayer localPlayer;
         OnlineMatch online;
-        bool guessMode;
         bool showingLobby;
         Coroutine toastRoutine;
 
@@ -122,8 +119,9 @@ namespace TrickyPictures
                 chatInput.characterLimit = AppConfig.MaxMessageLength;
                 chatInput.onSubmit.AddListener(_ => SubmitChatInput());
             }
-            if (chatModeToggle) chatModeToggle.onValueChanged.AddListener(on => { if (on) SetGuessMode(false); });
-            if (guessModeToggle) guessModeToggle.onValueChanged.AddListener(on => { if (on) SetGuessMode(true); });
+            var modeSelector = chatModeToggle ? chatModeToggle.transform.parent
+                : guessModeToggle ? guessModeToggle.transform.parent : null;
+            if (modeSelector) modeSelector.gameObject.SetActive(false);
 
             Bind(copyCodeButton, () => CopyRoomCode("Room code copied!"));
             Bind(shareButton, () => CopyRoomCode("Room code copied - send it to your friends!"));
@@ -175,8 +173,8 @@ namespace TrickyPictures
             if (connectionStatusDot) connectionStatusDot.color = connected ? OnlineColor : OfflineColor;
             if (roomCodeLabel) roomCodeLabel.text = RoomLabel();
 
-            if (chatModeToggle) chatModeToggle.isOn = true;
-            SetGuessMode(false);
+            if (chatInput && chatInput.placeholder is TMP_Text placeholder)
+                placeholder.text = "Chat or guess the word...";
             HideOverlays();
 
             if (connected)
@@ -309,13 +307,13 @@ namespace TrickyPictures
         void OnCorrectGuess(MatchPlayer player, int position, int points)
         {
             bool isLocal = player.PlayerId == ProfileService.Current.PlayerId;
-            AddCorrectGuessMessage($"{(isLocal ? "You" : player.DisplayName)} guessed the answer!  +{points}");
+            AddCorrectGuessMessage(isLocal ? "You guessed the word" : player.DisplayName + " guessed the word");
             if (isLocal && roundStatusText) roundStatusText.text = $"Correct! +{points} points";
         }
 
         void OnIncorrectGuess(MatchPlayer player, string text)
         {
-            AddChatMessage(player, "<color=#B8BCD9><i>guessed:</i></color> " + Escape(text) + "  <color=#B8BCD9>- not quite!</color>");
+            AddChatMessage(player, Escape(text));
         }
 
         void OnRoundEnded(PuzzleDefinition puzzle)
@@ -410,22 +408,11 @@ namespace TrickyPictures
 
         // ---------------- Chat ----------------
 
-        void SetGuessMode(bool guess)
-        {
-            guessMode = guess;
-            if (chatInput && chatInput.placeholder is TMP_Text placeholder)
-                placeholder.text = guess ? "Type your guess..." : "Type a message...";
-            UpdateRoundStatus();
-            FocusChatInput();
-        }
-
         void UpdateRoundStatus()
         {
             if (!roundStatusText || roundManager == null || roundManager.Phase != MatchPhase.Playing) return;
             if (localPlayer != null && roundManager.HasSolved(localPlayer.PlayerId)) return;
-            roundStatusText.text = guessMode
-                ? "Type your answer and press Send!"
-                : "Switch to Guess mode to answer!";
+            roundStatusText.text = "Chat here, or type the word to guess!";
         }
 
         void SubmitChatInput()
@@ -437,41 +424,36 @@ namespace TrickyPictures
             chatInput.text = "";
             FocusChatInput();
 
-            if (!guessMode)
+            if (!chatLimiter.TryConsume())
             {
-                if (!chatLimiter.TryConsume())
-                {
-                    AddSystemMessage("You're sending messages too fast.");
-                    return;
-                }
-                if (online != null) online.SendChat(text);
-                else AddChatMessage(localPlayer, Escape(text));
+                AddSystemMessage("You're sending messages too fast.");
                 return;
             }
 
-            if (online != null && !online.IsHost)
+            if (online != null)
             {
-                if (!guessLimiter.TryConsume())
-                {
-                    AddSystemMessage("Slow down a little!");
-                    return;
-                }
-                online.SendGuess(text);
+                online.SendChat(text);
                 return;
             }
 
             switch (roundManager.SubmitGuess(localPlayer.PlayerId, roundManager.RoundIndex, text))
             {
-                case GuessResult.NotPlaying:
-                    AddSystemMessage("Guesses are only accepted while a round is running.");
-                    break;
+                case GuessResult.Correct:
+                case GuessResult.Incorrect:
+                    return;
                 case GuessResult.AlreadySolved:
-                    AddSystemMessage("You already solved this puzzle!");
+                    if (GuessProcessor.IsCorrect(text, roundManager.CurrentPuzzle))
+                    {
+                        AddSystemMessage("You already solved this puzzle!");
+                        return;
+                    }
                     break;
                 case GuessResult.RateLimited:
                     AddSystemMessage("Slow down a little!");
-                    break;
+                    return;
             }
+
+            AddChatMessage(localPlayer, Escape(text));
         }
 
         void FocusChatInput()

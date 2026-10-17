@@ -288,6 +288,26 @@ namespace TrickyPictures
             if (seat == null || string.IsNullOrWhiteSpace(text)) return;
             text = Sanitize(text);
             if (text.Length > AppConfig.MaxMessageLength) text = text.Substring(0, AppConfig.MaxMessageLength);
+
+            switch (rounds.SubmitGuess(seat.Id, rounds.RoundIndex, text))
+            {
+                case GuessResult.Correct:
+                case GuessResult.Incorrect:
+                    return;
+                case GuessResult.AlreadySolved:
+                    if (GuessProcessor.IsCorrect(text, rounds.CurrentPuzzle))
+                    {
+                        session.SendTo(from, FusionSession.Pack("sys", "You already solved this puzzle!"));
+                        return;
+                    }
+                    break;
+                case GuessResult.RateLimited:
+                    session.SendTo(from, FusionSession.Pack("sys", "Slow down a little!"));
+                    return;
+                case GuessResult.NotParticipant:
+                    return;
+            }
+
             ui.PresentChat(seat.Id, text);
             session.Broadcast(FusionSession.Pack("said", seat.Id, text));
         }
